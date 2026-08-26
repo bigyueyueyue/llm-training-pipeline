@@ -1,0 +1,5 @@
+-r requirements-dev.txt
+accelerate>=0.34
+matplotlib>=3.8
+# GPU only（上卡后手动装）：
+# flash-attn>=2.6
