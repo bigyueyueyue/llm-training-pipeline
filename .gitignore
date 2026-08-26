@@ -1,0 +1,42 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# --- 依赖/环境 ---
+.env
+*.env
+
+# --- 模型与训练产物 ---
+*.bin
+*.safetensors
+*.ckpt
+*.pt
+*.pth
+checkpoints/
+output/
+outputs/
+adapter_model*/
+runs/
+wandb/
+lightning_logs/
+
+# --- 数据 ---
+data/
+*.arrow
+*.jsonl.gz
+
+# --- HuggingFace 缓存 ---
+.cache/
+hf_cache/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
