@@ -6,13 +6,13 @@
 
 **Architecture:** `attention_forward` 按 device/dtype/head_dim/flash 可用性运行时选后端并返回命中后端；`KVCache` 预分配 buffer + 位置游标支撑 prefill 全量写 / decode 增量 append；`generate.py`/`benchmark.py` 串起二者，上卡运行。CPU 只测 dispatch 选择与缓存逻辑，FA2 路径与吞吐数字 GPU-deferred。
 
-**Tech Stack:** torch 2.11（CPU）；`flash_attn`（可选、运行时守卫）；复用 `operators.gqa`；pytest。
+**Tech Stack:** torch 2.13（CPU）；`flash_attn`（可选、运行时守卫）；复用 `operators.gqa`；pytest。
 
 ## Global Constraints
 
-- 本机 torch 2.11.0，**无 CUDA、无 flash-attn**（`flash_attn_available()` 恒为 False）。
+- 本机 torch 2.13.0，**无 CUDA、无 flash-attn**（`flash_attn_available()` 恒为 False）。
 - CPU 单测用 fp32，不依赖 GPU / flash-attn；所有单测必须 CPU 可跑。
-- SDPA 路径**必须**传 `enable_gqa=(num_heads != num_key_value_heads)`（torch 2.11 默认不广播 KV 头，GQA 下不传会 RuntimeError）。
+- SDPA 路径**必须**传 `enable_gqa=(num_heads != num_key_value_heads)`（torch 2.13 默认不广播 KV 头，GQA 下不传会 RuntimeError）。
 - FA2 选择条件：flash 可用 + `device.type=="cuda"` + `dtype ∈ {fp16, bf16}` + `head_dim ≤ 256`。
 - 手动兜底复用 `operators.gqa.grouped_query_attention`（第一部分产物，**不得修改**）。
 - 接口签名与规格 §4.2 / §5.2 严格一致：`attention_forward(query, key, value, num_key_value_heads, *, is_causal=True, backend="auto", softmax_scale=None) -> (Tensor, str)`；`KVCache.update(layer_idx, key, value, positions)` 的 `positions` 为 `torch.LongTensor`。
@@ -374,7 +374,7 @@ def attention_forward(query, key, value, num_key_value_heads, *,
         return out.transpose(1, 2), resolved.value
 
     if resolved == AttentionBackend.SDPA:
-        # torch 2.11 默认不广播 KV 头，GQA 必须显式 enable_gqa
+        # torch 2.13 默认不广播 KV 头，GQA 必须显式 enable_gqa
         out = F.scaled_dot_product_attention(
             query, key, value, is_causal=is_causal, scale=softmax_scale,
             enable_gqa=(num_heads != num_key_value_heads))

@@ -28,11 +28,11 @@
 |---|---|
 | dispatch 层 | 纯 PyTorch；`flash_attn`（可选依赖，运行时 `import` 守卫） |
 | FA2 后端 | `flash_attn.flash_attn_func`（GPU-only，fp16/bf16） |
-| SDPA 后端 | `torch.nn.functional.scaled_dot_product_attention`（torch 2.11，CPU/GPU 都可用，原生支持 GQA） |
+| SDPA 后端 | `torch.nn.functional.scaled_dot_product_attention`（torch 2.13，CPU/GPU 都可用，原生支持 GQA） |
 | 手写后端 | 复用第一部分 `operators.gqa.grouped_query_attention` |
 | KV Cache | 纯 PyTorch 张量预分配 + 位置游标，手写 |
 | 测试 | `pytest`；CPU 单测用 fp32 |
-| 环境事实 | torch 2.11.0；本机无 CUDA、无 flash-attn（`flash_attn_available()` 为 False） |
+| 环境事实 | torch 2.13.0；本机无 CUDA、无 flash-attn（`flash_attn_available()` 为 False） |
 
 **明确不选**：不引入 `torch.compile`、不写 CUDA/C++ 扩展、不依赖 `transformers` 的 `past_key_values` 机制（本部分 KV Cache 手写）。
 
@@ -67,7 +67,7 @@ Project2/
 | backend | 条件 | 实现 |
 |---|---|---|
 | `flash_attn_2` | `flash_attn` 可用 + `device.type=="cuda"` + `dtype ∈ {fp16, bf16}` + `head_dim ≤ 256` | `flash_attn_func`（注意其布局为 `(b, s, h, d)`，需 `transpose(1,2)` 进出） |
-| `sdpa` | 默认 | `F.scaled_dot_product_attention`，需显式传 `enable_gqa=True`（torch 2.11 默认**不**自动广播 KV 头，GQA 下不传会报错） |
+| `sdpa` | 默认 | `F.scaled_dot_product_attention`，需显式传 `enable_gqa=True`（torch 2.13 默认**不**自动广播 KV 头，GQA 下不传会报错） |
 | `manual` | 显式指定 | `operators.gqa.grouped_query_attention`（`repeat_kv` 扩到 num_heads） |
 
 `backend="auto"` 时按上述条件**自上而下**选第一个满足者；`backend` 显式传值时强制走指定后端（供测试/对拍/压测）。
@@ -83,7 +83,7 @@ class AttentionBackend(str, Enum):
     MANUAL = "manual"
 
 def flash_attn_available() -> bool:
-    """flash-attn 是否可用：import 成功且 is_available() 为 True。"""
+    """flash-attn 是否可用：import 成功且导出 flash_attn_func（真实 flash-attn 无 is_available()）。"""
 
 def select_backend(device, dtype, head_dim, *, flash_available, backend="auto") -> AttentionBackend:
     """纯函数：给定 device/dtype/head_dim/flash_available，返回选中的后端。"""

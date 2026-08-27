@@ -2,13 +2,13 @@
 
 基于开源基座 **Qwen2.5-7B-Instruct**，在 **NVIDIA RTX 6000（48GB）** 单卡上搭建的 LLM 微调与对齐工程。求职作品集项目，兼顾「可复现实验」与「讲得清原理」。
 
-Monorepo 分三个子项目（当前已实现子项目 1）：
+Monorepo 分三个子项目（均已实现，核心逻辑 CPU 单测覆盖，GPU 训练/推理 deferred 上卡跑）：
 
 | 子项目 | 内容 | 状态 |
 |---|---|---|
 | 1. SFT 微调链路 | 自定义多轮掩码 DataCollator + LoRA + 收敛对比实验 | ✅ 已实现 |
-| 2. 手写算子 + 推理加速 | RoPE / GQA 手写验证、FlashAttention-2、KV Cache 压测 | 规划中 |
-| 3. GRPO RL 对齐 | 组合奖励函数、免 Critic 低显存对齐 | 规划中 |
+| 2. 手写算子 + 推理加速 | RoPE / GQA 手写验证、FlashAttention-2 调度、KV Cache 压测 | ✅ 已实现 |
+| 3. GRPO RL 对齐 | 规则奖励 + 手写 GRPO 核心（免 Critic）+ LoRA 训练循环 | ✅ 已实现 |
 
 ---
 
@@ -26,11 +26,14 @@ Monorepo 分三个子项目（当前已实现子项目 1）：
 ### 目录结构
 
 ```
-core/    tokenizer 加载、收敛指标（共享）
-sft/     数据、collator、训练、A/B 实验（子项目 1）
-tests/   全部 CPU 可跑的单元测试
-scripts/ 环境脚本
-docs/    设计规格、实施计划、实验记录
+core/       tokenizer 加载、收敛指标（共享）
+sft/        数据、collator、训练、A/B 实验（子项目 1）
+operators/  手写 RoPE / GQA 算子（子项目 2）
+inference/  FA2 调度 + KV Cache + 吞吐压测（子项目 2）
+grpo/       规则奖励 + 手写 GRPO 核心 + 训练循环（子项目 3）
+tests/      全部 CPU 可跑的单元测试
+scripts/    环境脚本
+docs/       设计规格、实施计划、实验记录
 ```
 
 ### 环境
@@ -51,4 +54,10 @@ bash scripts/setup_env.sh train  # 训练依赖（不含 flash-attn，GPU 上单
 
 # 收敛 A/B 实验（GPU，输出 docs/experiments/）
 .venv/bin/python sft/run_masking_ab.py --steps 200
+
+# 推理加速吞吐压测（GPU，上卡后）
+.venv/bin/python -m inference.benchmark --batch 1 2 4 8 --seq-len 128 256 512 1024 2048
+
+# GRPO RL 对齐（GPU，上卡后）
+.venv/bin/python grpo/train.py --config grpo/config/grpo_lora.yaml
 ```
