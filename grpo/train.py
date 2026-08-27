@@ -44,9 +44,11 @@ def build_prompt(question: str) -> str:
 
 def main(config: GRPOConfig):
     """GRPO 训练循环。上卡后运行；本函数不在 CPU 上执行。"""
+    import os
+
     import torch
     from datasets import load_dataset
-    from transformers import AutoModelForCausalLM
+    from transformers import AutoModelForCausalLM, get_cosine_schedule_with_warmup
     from peft import LoraConfig, TaskType, get_peft_model
 
     from core.tokenizer_utils import load_tokenizer
@@ -55,6 +57,7 @@ def main(config: GRPOConfig):
     from grpo.loss import grpo_loss
     from grpo.cache import CompletionCache
     from grpo.generate import compute_seq_log_probs, sample_completions
+    from grpo.sampling import group_indices
 
     tokenizer = load_tokenizer(config.model_id)
     device = "cuda"
@@ -64,6 +67,7 @@ def main(config: GRPOConfig):
 
     model = AutoModelForCausalLM.from_pretrained(config.model_id, torch_dtype=torch.bfloat16)
     if config.grad_checkpoint:
+        model.gradient_checkpointing_enable()
         model.enable_input_require_grads()
     lora = LoraConfig(task_type=TaskType.CAUSAL_LM, r=config.lora_r,
                       lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout,
@@ -72,11 +76,17 @@ def main(config: GRPOConfig):
     ref_model = AutoModelForCausalLM.from_pretrained(
         config.model_id, torch_dtype=torch.bfloat16).eval().to(device)
 
+    os.makedirs(config.output_dir, exist_ok=True)
     cache = CompletionCache(f"{config.output_dir}/completion_cache.jsonl")
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr)
 
     prompts = [build_prompt(ex["question"]) for ex in ds]
     golds = [extract_answer(ex["answer"]) for ex in ds]
+
+    num_micro_steps = config.num_epochs * ((len(prompts) + config.prompts_per_step - 1) // config.prompts_per_step)
+    num_optim_steps = max(1, num_micro_steps // config.grad_accum)
+    scheduler = get_cosine_schedule_with_warmup(
+        optimizer, num_warmup_steps=0, num_training_steps=num_optim_steps)
 
     model.train()
     for epoch in range(config.num_epochs):
@@ -91,8 +101,9 @@ def main(config: GRPOConfig):
                 max_new_tokens=config.max_new_tokens, device=device)
 
             # 2) 奖励（带缓存）：completion 展平布局 = prompt0 的 G 条在前
-            gold_rep = [g for g in batch_golds for _ in range(config.group_size)]
-            prompt_rep = [p for p in batch_prompts for _ in range(config.group_size)]
+            gidx = group_indices(len(batch_prompts), config.group_size).tolist()
+            gold_rep = [batch_golds[i] for i in gidx]
+            prompt_rep = [batch_prompts[i] for i in gidx]
             rewards = []
             for i, (prompt, completion, gold) in enumerate(zip(prompt_rep, completions, gold_rep)):
                 hit = cache.get(prompt, completion)
@@ -117,10 +128,14 @@ def main(config: GRPOConfig):
 
             if (start // config.prompts_per_step + 1) % config.grad_accum == 0:
                 optimizer.step()
+                scheduler.step()
                 optimizer.zero_grad()
 
             print(f"epoch={epoch} step={start // config.prompts_per_step} "
                   f"loss={loss.item():.4f} mean_reward={rewards.mean().item():.3f}")
+
+    model.save_pretrained(config.output_dir)
+    tokenizer.save_pretrained(config.output_dir)
 
 
 if __name__ == "__main__":

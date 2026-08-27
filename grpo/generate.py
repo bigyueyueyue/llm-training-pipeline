@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import torch
 
+from grpo.sampling import sum_log_probs
+
 
 @torch.no_grad()
 def sample_completions(model, tokenizer, prompts, *, group_size: int,
@@ -51,16 +53,17 @@ def compute_seq_log_probs(model, tokenizer, prompts, completions, device: str = 
     logits = model(input_ids=input_ids, attention_mask=mask).logits
     log_probs = F.log_softmax(logits.float(), dim=-1)
 
-    totals = torch.zeros(input_ids.shape[0], device=device)
+    totals = []
     for i in range(input_ids.shape[0]):
         start = int(prompt_lens[i].item()) - 1      # 第一个 completion token 的预测位置
         end = int(mask[i].sum().item()) - 1         # 最后一个有效 token 的预测位置
         if end <= start:
+            totals.append(torch.zeros((), device=device))
             continue
         target = input_ids[i, start + 1:end + 1]
         lp = log_probs[i, start:end].gather(-1, target.unsqueeze(-1)).squeeze(-1)
-        totals[i] = lp.sum()
-    return totals
+        totals.append(lp.sum())
+    return torch.stack(totals)
 
 
 def _seq_log_probs(gen_output, prompt_len: int) -> torch.Tensor:
@@ -71,4 +74,4 @@ def _seq_log_probs(gen_output, prompt_len: int) -> torch.Tensor:
     log_softmax = F.log_softmax(scores.float(), dim=-1)
     gen_ids = gen_output.sequences[:, prompt_len:]
     per_token = log_softmax.gather(-1, gen_ids.unsqueeze(-1)).squeeze(-1)
-    return per_token.sum(dim=1)
+    return sum_log_probs(per_token)
