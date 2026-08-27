@@ -31,10 +31,9 @@ def sample_completions(model, tokenizer, prompts, *, group_size: int,
         for i in range(group_size):
             completions.append(tokenizer.decode(gen_ids[i], skip_special_tokens=True))
         all_log_probs.extend(_seq_log_probs(out, prompt_len).detach().tolist())
-    return completions, torch.tensor(all_log_probs)
+    return completions, torch.tensor(all_log_probs, device=device)
 
 
-@torch.no_grad()
 def compute_seq_log_probs(model, tokenizer, prompts, completions, device: str = "cuda"):
     """对 (prompt, completion) 拼接序列前向，返回每条 completion 部分的 sum log-prob。
 

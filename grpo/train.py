@@ -57,6 +57,7 @@ def main(config: GRPOConfig):
     from grpo.generate import compute_seq_log_probs, sample_completions
 
     tokenizer = load_tokenizer(config.model_id)
+    device = "cuda"
     ds = load_dataset(config.dataset_name, "main", split="train")
     if config.max_samples is not None:
         ds = ds.select(range(config.max_samples))
@@ -67,9 +68,9 @@ def main(config: GRPOConfig):
     lora = LoraConfig(task_type=TaskType.CAUSAL_LM, r=config.lora_r,
                       lora_alpha=config.lora_alpha, lora_dropout=config.lora_dropout,
                       target_modules=list(config.lora_target))
-    model = get_peft_model(model, lora)
+    model = get_peft_model(model, lora).to(device)
     ref_model = AutoModelForCausalLM.from_pretrained(
-        config.model_id, torch_dtype=torch.bfloat16).eval()
+        config.model_id, torch_dtype=torch.bfloat16).eval().to(device)
 
     cache = CompletionCache(f"{config.output_dir}/completion_cache.jsonl")
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr)
@@ -87,26 +88,27 @@ def main(config: GRPOConfig):
             completions, old_log_probs = sample_completions(
                 model, tokenizer, batch_prompts, group_size=config.group_size,
                 temperature=config.temperature, top_p=config.top_p,
-                max_new_tokens=config.max_new_tokens)
+                max_new_tokens=config.max_new_tokens, device=device)
 
             # 2) 奖励（带缓存）：completion 展平布局 = prompt0 的 G 条在前
             gold_rep = [g for g in batch_golds for _ in range(config.group_size)]
             prompt_rep = [p for p in batch_prompts for _ in range(config.group_size)]
             rewards = []
-            for prompt, completion, gold in zip(prompt_rep, completions, gold_rep):
+            for i, (prompt, completion, gold) in enumerate(zip(prompt_rep, completions, gold_rep)):
                 hit = cache.get(prompt, completion)
                 if hit is not None:
                     rewards.append(hit["reward"])
                 else:
                     r = combined_reward(completion, gold)
-                    cache.put(prompt, completion, r, 0.0)  # log_prob 稍后回填
+                    cache.put(prompt, completion, r, old_log_probs[i].item())
                     rewards.append(r)
-            rewards = torch.tensor(rewards)
+            rewards = torch.tensor(rewards, device=device)
 
             # 3) 优势 + 三路 log-prob
             advantages = group_advantage(rewards, group_size=config.group_size)
-            log_probs = compute_seq_log_probs(model, tokenizer, prompt_rep, completions)
-            ref_log_probs = compute_seq_log_probs(ref_model, tokenizer, prompt_rep, completions)
+            log_probs = compute_seq_log_probs(model, tokenizer, prompt_rep, completions, device=device)
+            with torch.no_grad():
+                ref_log_probs = compute_seq_log_probs(ref_model, tokenizer, prompt_rep, completions, device=device)
 
             # 4) loss（grad_accum）
             loss = grpo_loss(log_probs, old_log_probs, ref_log_probs, advantages,
