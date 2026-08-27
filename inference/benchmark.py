@@ -39,20 +39,24 @@ def bench_prefill(batch, seq_len, num_heads, num_kv_heads, head_dim, dtype, devi
 def bench_decode(batch, seq_len, num_heads, num_kv_heads, head_dim, dtype, device, repeats=10):
     cache = KVCache(num_layers=1, batch=batch, num_kv_heads=num_kv_heads,
                     head_dim=head_dim, max_seq_len=seq_len + 1, dtype=dtype, device=device)
-    k = torch.randn(batch, num_kv_heads, seq_len - 1, head_dim, dtype=dtype, device=device)
-    v = torch.randn(batch, num_kv_heads, seq_len - 1, head_dim, dtype=dtype, device=device)
-    cache.update(0, k, v, torch.arange(seq_len - 1, device=device))
+    k_pre = torch.randn(batch, num_kv_heads, seq_len - 1, head_dim, dtype=dtype, device=device)
+    v_pre = torch.randn(batch, num_kv_heads, seq_len - 1, head_dim, dtype=dtype, device=device)
+    cache.update(0, k_pre, v_pre, torch.arange(seq_len - 1, device=device))
     cache.advance(seq_len - 1)
     q = torch.randn(batch, num_heads, 1, head_dim, dtype=dtype, device=device)
     kk = torch.randn(batch, num_kv_heads, 1, head_dim, dtype=dtype, device=device)
     vv = torch.randn(batch, num_kv_heads, 1, head_dim, dtype=dtype, device=device)
+    cache.update(0, kk, vv, torch.tensor([seq_len - 1], device=device))
+    cache.advance(1)
+    k_full, v_full = cache.get(0)  # (batch, num_kv_heads, seq_len, head_dim)
+    # 新 token 对全量缓存历史做 full attention（query 即最后位置，无因果掩码）
     for _ in range(3):
-        attention_forward(q, kk, vv, num_kv_heads, is_causal=True)
+        attention_forward(q, k_full, v_full, num_kv_heads, is_causal=False)
     if device.type == "cuda":
         torch.cuda.synchronize()
     t0 = time.perf_counter()
     for _ in range(repeats):
-        attention_forward(q, kk, vv, num_kv_heads, is_causal=True)
+        attention_forward(q, k_full, v_full, num_kv_heads, is_causal=False)
     if device.type == "cuda":
         torch.cuda.synchronize()
     dt = time.perf_counter() - t0
