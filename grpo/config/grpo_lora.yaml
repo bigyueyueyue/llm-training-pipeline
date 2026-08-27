@@ -1,0 +1,24 @@
+model_id: "Qwen/Qwen2.5-7B-Instruct"
+dataset_name: "openai/gsm8k"
+max_samples: 1000
+output_dir: "outputs/grpo-lora"
+
+lora_r: 16
+lora_alpha: 32
+lora_dropout: 0.05
+lora_target: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+
+group_size: 4
+prompts_per_step: 4
+grad_accum: 2
+clip_epsilon: 0.2
+beta: 0.01
+
+temperature: 1.0
+top_p: 0.95
+max_new_tokens: 256
+
+lr: 1.0e-5
+num_epochs: 1
+bf16: true
+grad_checkpoint: true
