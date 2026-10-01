@@ -36,10 +36,17 @@ class GRPOConfig:
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
 
 
-def build_prompt(question: str) -> str:
-    """把 GSM8K 题目包成固定指令模板（格式奖励的依据）。"""
-    return (f"Solve the following math problem step by step, then give the final "
-            f'answer after "####".\n\nQuestion: {question}\n')
+def build_prompt(question: str, tokenizer) -> str:
+    """把 GSM8K 题目包成 Qwen 聊天模板（含 assistant 生成前缀）。
+
+    关键：Qwen2.5-Instruct 是聊天模型，裸文本直接喂会退化成重复乱码；
+    必须走 apply_chat_template(add_generation_prompt=True) 让它认得这是 user turn。
+    """
+    instruction = (f"Solve the following math problem step by step, then give the final "
+                   f'answer after "####".\n\nQuestion: {question}')
+    return tokenizer.apply_chat_template(
+        [{"role": "user", "content": instruction}],
+        tokenize=False, add_generation_prompt=True)
 
 
 def main(config: GRPOConfig):
@@ -80,7 +87,7 @@ def main(config: GRPOConfig):
     cache = CompletionCache(f"{config.output_dir}/completion_cache.jsonl")
     optimizer = torch.optim.AdamW(model.parameters(), lr=config.lr)
 
-    prompts = [build_prompt(ex["question"]) for ex in ds]
+    prompts = [build_prompt(ex["question"], tokenizer) for ex in ds]
     golds = [extract_answer(ex["answer"]) for ex in ds]
 
     num_micro_steps = config.num_epochs * ((len(prompts) + config.prompts_per_step - 1) // config.prompts_per_step)
