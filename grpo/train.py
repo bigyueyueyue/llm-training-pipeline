@@ -116,7 +116,7 @@ def main(config: GRPOConfig):
             #    用 raw logits 前向重算，而不是 generate 的 scores（那是 top_p 过滤后的
             #    扭曲分布，还含 EOS/padding，曾导致 exp 溢出成 NaN）。
             with torch.no_grad():
-                old_log_probs = compute_seq_log_probs(model, tokenizer, prompt_rep, completions, device=device)
+                old_log_probs = compute_seq_log_probs(model, tokenizer, prompt_rep, completions, device=device, tag="old")
 
             # 4) 奖励（带缓存）
             rewards = []
@@ -132,9 +132,16 @@ def main(config: GRPOConfig):
 
             # 5) 优势 + 当前策略 log-prob + 参考模型 log-prob
             advantages = group_advantage(rewards, group_size=config.group_size)
-            log_probs = compute_seq_log_probs(model, tokenizer, prompt_rep, completions, device=device)
+            log_probs = compute_seq_log_probs(model, tokenizer, prompt_rep, completions, device=device, tag="cur")
             with torch.no_grad():
-                ref_log_probs = compute_seq_log_probs(ref_model, tokenizer, prompt_rep, completions, device=device)
+                ref_log_probs = compute_seq_log_probs(ref_model, tokenizer, prompt_rep, completions, device=device, tag="ref")
+
+            if start == 0:  # 诊断：定位 NaN 到底来自哪个张量
+                for name, t in (("advantages", advantages), ("log_probs", log_probs),
+                                ("old_log_probs", old_log_probs), ("ref_log_probs", ref_log_probs)):
+                    print(f"[diag] {name}: nan={int(torch.isnan(t).sum())} "
+                          f"inf={int(torch.isinf(t).sum())} "
+                          f"min={t.min().item():.3f} max={t.max().item():.3f}", flush=True)
 
             # 6) loss（grad_accum）
             loss = grpo_loss(log_probs, old_log_probs, ref_log_probs, advantages,
@@ -147,7 +154,7 @@ def main(config: GRPOConfig):
                 optimizer.zero_grad()
 
             print(f"epoch={epoch} step={start // config.prompts_per_step} "
-                  f"loss={loss.item():.4f} mean_reward={rewards.mean().item():.3f}")
+                  f"loss={loss.item():.4f} mean_reward={rewards.mean().item():.3f}", flush=True)
 
     model.save_pretrained(config.output_dir)
     tokenizer.save_pretrained(config.output_dir)

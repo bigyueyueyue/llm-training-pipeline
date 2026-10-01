@@ -38,7 +38,7 @@ def sample_completions(model, tokenizer, prompts, *, group_size: int,
     return completions
 
 
-def compute_seq_log_probs(model, tokenizer, prompts, completions, device: str = "cuda"):
+def compute_seq_log_probs(model, tokenizer, prompts, completions, device: str = "cuda", tag: str = ""):
     """对 (prompt, completion) 拼接序列前向，返回每条 completion 部分的 sum log-prob。
 
     用于计算「当前策略」「参考模型」的序列 log-prob（loss 里的 log_probs / ref_log_probs）。
@@ -53,6 +53,9 @@ def compute_seq_log_probs(model, tokenizer, prompts, completions, device: str = 
     prompt_lens = prompt_enc["attention_mask"].sum(dim=1)  # (B,)
 
     logits = model(input_ids=input_ids, attention_mask=mask).logits
+    if torch.isnan(logits).any() or torch.isinf(logits).any():
+        print(f"[diag] logits[{tag}] nan={int(torch.isnan(logits).sum())} "
+              f"inf={int(torch.isinf(logits).sum())}", flush=True)
     log_probs = F.log_softmax(logits.float(), dim=-1)
 
     totals = []
