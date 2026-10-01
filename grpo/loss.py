@@ -11,7 +11,8 @@ def grpo_loss(log_probs: torch.Tensor, old_log_probs: torch.Tensor,
     advantages: (N*G,) 组内优势。
     old_log_probs 与 ref_log_probs 应已 detach（由调用方保证）。
     """
-    ratio = torch.exp(log_probs - old_log_probs)
+    log_ratio = torch.clamp(log_probs - old_log_probs, -20.0, 20.0)  # 数值护栏：防 exp 溢出 inf
+    ratio = torch.exp(log_ratio)
     clipped = torch.clamp(ratio, 1 - clip_epsilon, 1 + clip_epsilon)
     policy_loss = -torch.min(ratio * advantages, clipped * advantages).mean()
     kl = log_probs - ref_log_probs  # 序列级 log-prob 差之和

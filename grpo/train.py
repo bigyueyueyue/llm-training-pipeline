@@ -102,15 +102,23 @@ def main(config: GRPOConfig):
             batch_golds = golds[start:start + config.prompts_per_step]
 
             # 1) 组采样（G 条 / prompt）
-            completions, old_log_probs = sample_completions(
+            completions = sample_completions(
                 model, tokenizer, batch_prompts, group_size=config.group_size,
                 temperature=config.temperature, top_p=config.top_p,
                 max_new_tokens=config.max_new_tokens, device=device)
 
-            # 2) 奖励（带缓存）：completion 展平布局 = prompt0 的 G 条在前
+            # 2) 展开布局：completion 展平 = prompt0 的 G 条在前
             gidx = group_indices(len(batch_prompts), config.group_size).tolist()
             gold_rep = [batch_golds[i] for i in gidx]
             prompt_rep = [batch_prompts[i] for i in gidx]
+
+            # 3) old_log_probs：采样时刻策略的序列 log-prob。必须与 log_probs 同口径——
+            #    用 raw logits 前向重算，而不是 generate 的 scores（那是 top_p 过滤后的
+            #    扭曲分布，还含 EOS/padding，曾导致 exp 溢出成 NaN）。
+            with torch.no_grad():
+                old_log_probs = compute_seq_log_probs(model, tokenizer, prompt_rep, completions, device=device)
+
+            # 4) 奖励（带缓存）
             rewards = []
             for i, (prompt, completion, gold) in enumerate(zip(prompt_rep, completions, gold_rep)):
                 hit = cache.get(prompt, completion)
@@ -122,13 +130,13 @@ def main(config: GRPOConfig):
                     rewards.append(r)
             rewards = torch.tensor(rewards, device=device)
 
-            # 3) 优势 + 三路 log-prob
+            # 5) 优势 + 当前策略 log-prob + 参考模型 log-prob
             advantages = group_advantage(rewards, group_size=config.group_size)
             log_probs = compute_seq_log_probs(model, tokenizer, prompt_rep, completions, device=device)
             with torch.no_grad():
                 ref_log_probs = compute_seq_log_probs(ref_model, tokenizer, prompt_rep, completions, device=device)
 
-            # 4) loss（grad_accum）
+            # 6) loss（grad_accum）
             loss = grpo_loss(log_probs, old_log_probs, ref_log_probs, advantages,
                              clip_epsilon=config.clip_epsilon, beta=config.beta)
             (loss / config.grad_accum).backward()
