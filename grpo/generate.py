@@ -15,6 +15,10 @@ def sample_completions(model, tokenizer, prompts, *, group_size: int,
     completions: (len(prompts)*group_size,) 展平，prompt 0 的 G 条在前。
     old_log_probs: (len(prompts)*group_size,) 每条 completion 的序列 sum log-prob（生成时刻、已 detach）。
     """
+    # generate 需要 KV cache + eval 态：训练态下 gradient checkpointing 会关 use_cache，
+    # 导致每步重算全部历史 attention（O(n²)），生成极慢。这里临时开 cache、结束后恢复。
+    model.eval()
+    model.config.use_cache = True
     completions: list[str] = []
     all_log_probs: list[float] = []
     for prompt in prompts:
@@ -33,6 +37,8 @@ def sample_completions(model, tokenizer, prompts, *, group_size: int,
         for i in range(group_size):
             completions.append(tokenizer.decode(gen_ids[i], skip_special_tokens=True))
         all_log_probs.extend(_seq_log_probs(out, prompt_len).detach().tolist())
+    model.train()                 # 恢复训练态，供后续 compute_seq_log_probs（带梯度）
+    model.config.use_cache = False
     return completions, torch.tensor(all_log_probs, device=device)
 
 
