@@ -31,7 +31,7 @@ class SFTConfig:
     output_dir: str = "outputs/sft-lora"
     bf16: bool = True
     grad_checkpoint: bool = True
-    use_flash_attn: bool = True
+    attn_implementation: str = "sdpa"  # "sdpa" | "flash_attention_2" | "eager"
 
     @classmethod
     def from_yaml(cls, path: str) -> "SFTConfig":
@@ -51,9 +51,8 @@ def main(config: SFTConfig):
     tokenized = dataset.map(lambda ex: tokenize_fn(ex, tokenizer, config.max_length),
                             remove_columns=dataset.column_names)
 
-    attn = "flash_attention_2" if config.use_flash_attn else "eager"
     model = AutoModelForCausalLM.from_pretrained(config.model_id, torch_dtype="auto",
-                                                 attn_implementation=attn)
+                                                 attn_implementation=config.attn_implementation)
     if config.grad_checkpoint:
         model.enable_input_require_grads()
 

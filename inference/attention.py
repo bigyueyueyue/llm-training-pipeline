@@ -61,7 +61,7 @@ def attention_forward(query, key, value, num_key_value_heads, *,
         return out.transpose(1, 2), resolved.value
 
     if resolved == AttentionBackend.SDPA:
-        # torch 2.13 默认不广播 KV 头，GQA 必须显式 enable_gqa
+        # torch ≥2.5 的 SDPA 默认不广播 KV 头，GQA 须显式 enable_gqa；CUDA 上 SDPA 会自动调度到融合 flash 内核
         out = F.scaled_dot_product_attention(
             query, key, value, is_causal=is_causal, scale=softmax_scale,
             enable_gqa=(num_heads != num_key_value_heads))

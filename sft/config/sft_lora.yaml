@@ -17,4 +17,4 @@ warmup_ratio: 0.03
 output_dir: "outputs/sft-lora"
 bf16: true
 grad_checkpoint: true
-use_flash_attn: true
+attn_implementation: "sdpa"

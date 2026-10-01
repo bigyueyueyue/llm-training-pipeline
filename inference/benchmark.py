@@ -1,7 +1,7 @@
 """吞吐压测（GPU-deferred）。
 
 上卡后运行，测量 prefill（批量前向）与 decode（单 token 增量）两阶段吞吐，
-并打印实际命中的注意力后端，确保 FA2 真跑了而非静默降级。
+并打印实际命中的注意力后端，证明命中的是真实后端而非静默降级（FA2 / SDPA 融合 flash / 手写）。
 
 用法：python -m inference.benchmark --batch 1 2 4 8 --seq-len 128 256 512 1024 2048
 """
@@ -64,7 +64,7 @@ def bench_decode(batch, seq_len, num_heads, num_kv_heads, head_dim, dtype, devic
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description="FA2/KV Cache 吞吐压测（GPU）")
+    parser = argparse.ArgumentParser(description="注意力后端/KV Cache 吞吐压测（GPU）")
     parser.add_argument("--batch", type=int, nargs="+", default=[1, 2, 4, 8])
     parser.add_argument("--seq-len", type=int, nargs="+", default=[128, 256, 512, 1024, 2048])
     parser.add_argument("--num-heads", type=int, default=28)
