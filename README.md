@@ -50,14 +50,14 @@ bash scripts/setup_env.sh train  # 训练依赖（不含 flash-attn，GPU 上单
 .venv/bin/python -m pytest -v
 
 # SFT 训练（GPU，上卡后）
-.venv/bin/python sft/train.py --config sft/config/sft_lora.yaml
+.venv/bin/python -m sft.train --config sft/config/sft_lora.yaml
 
 # 收敛 A/B 实验（GPU，输出 docs/experiments/）
-.venv/bin/python sft/run_masking_ab.py --steps 200
+.venv/bin/python -m sft.run_masking_ab --steps 200
 
 # 推理加速吞吐压测（GPU，上卡后）
 .venv/bin/python -m inference.benchmark --batch 1 2 4 8 --seq-len 128 256 512 1024 2048
 
 # GRPO RL 对齐（GPU，上卡后）
-.venv/bin/python grpo/train.py --config grpo/config/grpo_lora.yaml
+.venv/bin/python -m grpo.train --config grpo/config/grpo_lora.yaml
 ```
