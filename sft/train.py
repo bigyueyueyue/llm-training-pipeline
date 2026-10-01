@@ -1,4 +1,5 @@
 import argparse
+import math
 from dataclasses import dataclass, field as dc_field
 
 import yaml
@@ -44,6 +45,17 @@ def tokenize_fn(example, tokenizer, max_length):
     return build_chat_sample(example["messages"], tokenizer, max_length=max_length)
 
 
+def _warmup_steps(config: SFTConfig, n_samples: int) -> int:
+    """把 warmup_ratio 折算成 warmup_steps，与 transformers 的 get_warmup_steps 语义一致。
+
+    TrainingArguments 的 warmup_ratio 是较新版本才有的参数，老版本会抛
+    unexpected keyword；warmup_steps 全版本通用，这里手动折算。
+    """
+    steps_per_epoch = math.ceil(n_samples / (config.per_device_batch * config.grad_accum))
+    num_training_steps = steps_per_epoch * config.num_epochs
+    return math.ceil(num_training_steps * config.warmup_ratio)
+
+
 def main(config: SFTConfig):
     tokenizer = load_tokenizer(config.model_id)
     dataset = load_multi_turn_dataset(config.dataset_name, field=config.field,
@@ -68,7 +80,7 @@ def main(config: SFTConfig):
         gradient_accumulation_steps=config.grad_accum,
         learning_rate=config.lr,
         num_train_epochs=config.num_epochs,
-        warmup_ratio=config.warmup_ratio,
+        warmup_steps=_warmup_steps(config, len(tokenized)),
         bf16=config.bf16,
         gradient_checkpointing=config.grad_checkpoint,
         logging_steps=1,
