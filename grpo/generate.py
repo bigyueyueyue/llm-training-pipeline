@@ -36,7 +36,7 @@ def sample_completions(model, tokenizer, prompts, *, group_size: int,
         gen_ids = out.sequences[:, prompt_len:]
         for i in range(group_size):
             completions.append(tokenizer.decode(gen_ids[i], skip_special_tokens=True))
-        all_log_probs.extend(_seq_log_probs(out, prompt_len).detach().tolist())
+        all_log_probs.extend(_seq_log_probs(out, prompt_len, tokenizer.eos_token_id).detach().tolist())
     model.train()                 # 恢复训练态，供后续 compute_seq_log_probs（带梯度）
     model.config.use_cache = False
     return completions, torch.tensor(all_log_probs, device=device)
@@ -72,12 +72,19 @@ def compute_seq_log_probs(model, tokenizer, prompts, completions, device: str = 
     return torch.stack(totals)
 
 
-def _seq_log_probs(gen_output, prompt_len: int) -> torch.Tensor:
-    """从 generate 的 scores 反算每条序列的 sum log-prob。"""
+def _seq_log_probs(gen_output, prompt_len: int, eos_token_id: int) -> torch.Tensor:
+    """从 generate 的 scores 反算每条序列的 sum log-prob（只累加 EOS 之前的真实 token）。
+
+    generate 返回的 sequences 在 EOS 之后用 pad_token 补齐（本项目 pad==eos），
+    且 output_scores 覆盖到整批最长序列。若把这些 EOS/padding 位也算进 sum，
+    会与 compute_seq_log_probs（按 decode 后文本重编码、不含 EOS）口径不一致，
+    exp(log_probs - old_log_probs) 溢出为 inf，再乘以 advantage==0 的组 → NaN loss。
+    """
     import torch.nn.functional as F
 
     scores = torch.stack(gen_output.scores, dim=1)  # (B, new_tokens, vocab)
     log_softmax = F.log_softmax(scores.float(), dim=-1)
     gen_ids = gen_output.sequences[:, prompt_len:]
     per_token = log_softmax.gather(-1, gen_ids.unsqueeze(-1)).squeeze(-1)
-    return sum_log_probs(per_token)
+    mask = (gen_ids != eos_token_id).to(per_token.dtype)
+    return sum_log_probs(per_token * mask)
